@@ -2,7 +2,7 @@ apt-install:
 	sudo apt update
 	sudo apt upgrade
 	sudo apt install default-jdk device-tree-compiler python curl gawk \
-	 libmpc-dev gcc gcc-riscv64-linux-gnu gcc-8-riscv64-linux-gnu flex bison
+	 libtinfo5 libmpc-dev gcc gcc-riscv64-linux-gnu gcc-8-riscv64-linux-gnu flex bison
 
 # skip submodules which are not needed and take long time to update
 SKIP_SUBMODULES = torture software/gemmini-rocc-tests software/onnxruntime-riscv
@@ -107,6 +107,7 @@ riscv-pk/build/bbl: riscv-pk-patch u-boot/u-boot
 BOARD ?= nexys-video
 CONFIG ?= rocket64b2
 CONFIG_SCALA := $(subst rocket,Rocket,$(CONFIG))
+JAVA_OPTIONS =
 
 ifeq ($(BOARD),nexys-video)
   BOARD_PART  ?= digilentinc.com:nexys_video:part0:1.1
@@ -139,7 +140,7 @@ endif
 ROCKET_FREQ ?= $(shell awk '$$3 != "" && "$(BOARD)" ~ $$1 && "$(CONFIG_SCALA)" ~ ("^" $$2 "$$") {print $$3; exit}' board/rocket-freq)
 ROCKET_FREQ_KHZ := $(shell echo - | awk '{print $(ROCKET_FREQ) * 1000}')
 
-ifeq ($(findstring rocket64,$(CONFIG)),)
+ifeq ($(findstring Rocket64,$(CONFIG_SCALA)),)
   CROSS_COMPILE_NO_OS_TOOLS = $(realpath workspace/gcc/riscv/bin)/riscv32-unknown-elf-
   CROSS_COMPILE_NO_OS_FLAGS = -march=rv32im -mabi=ilp32
 else
@@ -147,7 +148,7 @@ else
   CROSS_COMPILE_NO_OS_FLAGS = -march=rv64im -mabi=lp64
 endif
 
-SBT := java -Xmx4G -Xss8M -jar $(realpath rocket-chip/sbt-launch.jar)
+SBT := java -Xmx4G -Xss8M $(JAVA_OPTIONS) -jar $(realpath rocket-chip/sbt-launch.jar)
 CHISEL_SRC := $(foreach path, src/main rocket-chip/src/main riscv-boom/src/main, $(shell test -d $(path) && find $(path) -iname "*.scala"))
 
 ROCKET_CLASSES = \
@@ -161,7 +162,7 @@ SPACE := $(subst ,, )
 
 FIRRTL_SRC := $(shell test -d rocket-chip/firrtl/src/main && find rocket-chip/firrtl/src/main -iname "*.scala")
 FIRRTL_JAR = rocket-chip/firrtl/utils/bin/firrtl.jar
-FIRRTL = java -Xmx12G -Xss8M -cp $(FIRRTL_JAR):$(subst $(SPACE),:,$(strip $(ROCKET_CLASSES))) firrtl.stage.FirrtlMain
+FIRRTL = java -Xmx12G -Xss8M $(JAVA_OPTIONS) -cp $(FIRRTL_JAR):$(subst $(SPACE),:,$(strip $(ROCKET_CLASSES))) firrtl.stage.FirrtlMain
 
 $(FIRRTL_JAR): $(FIRRTL_SRC)
 	make -C rocket-chip/firrtl SBT="$(SBT)" root_dir=$(realpath rocket-chip/firrtl) build-scala
@@ -207,7 +208,7 @@ workspace/$(CONFIG)/rocket.vhdl: workspace/$(CONFIG)/system-$(BOARD).v
 	  -sourcepath vhdl-wrapper/src -d vhdl-wrapper/bin \
 	  -classpath vhdl-wrapper/antlr-4.8-complete.jar \
 	  vhdl-wrapper/src/net/largest/riscv/vhdl/Main.java
-	java -Xmx4G -Xss8M -classpath \
+	java -Xmx4G -Xss8M $(JAVA_OPTIONS) -cp \
 	  vhdl-wrapper/src:vhdl-wrapper/bin:vhdl-wrapper/antlr-4.8-complete.jar \
 	  net.largest.riscv.vhdl.Main \
 	  workspace/$(CONFIG)/system-$(BOARD).v >$@
@@ -231,7 +232,7 @@ proj_path = workspace/$(CONFIG)/vivado-$(proj_name)
 proj_file = $(proj_path)/$(proj_name).xpr
 bitstream = $(proj_path)/$(proj_name).runs/impl_1/riscv_wrapper.bit
 mcs_file  = workspace/$(CONFIG)/$(proj_name).mcs
-vivado    = vivado -mode batch -nojournal -nolog -notrace -quiet
+vivado    = env XILINX_LOCAL_USER_DATA=no vivado -mode batch -nojournal -nolog -notrace -quiet
 
 workspace/$(CONFIG)/system-$(BOARD).tcl: workspace/$(CONFIG)/rocket.vhdl workspace/$(CONFIG)/system-$(BOARD).v
 	echo "set vivado_board_name $(BOARD)" >$@
