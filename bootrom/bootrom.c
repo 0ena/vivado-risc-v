@@ -128,12 +128,8 @@ static BYTE card_type __attribute__((section(".bss")));
 static uint32_t response[4] __attribute__((section(".bss")));
 static FATFS fatfs __attribute__((section(".bss")));
 static int alt_mem __attribute__((section(".bss")));
+static FIL fd __attribute__((section(".bss")));
 
-extern unsigned char _ram[];
-extern unsigned char _ram_end[];
-
-extern unsigned char _ftext[];
-extern unsigned char _etext[];
 extern unsigned char _fbss[];
 extern unsigned char _ebss[];
 
@@ -143,12 +139,12 @@ static const char * errno_to_str(void) {
     case FR_DISK_ERR: return "Disk I/O error";
     case FR_INT_ERR: return "Assertion failed";
     case FR_NOT_READY: return "Disk not ready";
-    case FR_NO_FILE: return "Could not find the file";
-    case FR_NO_PATH: return "Could not find the path";
-    case FR_INVALID_NAME: return "The path name format is invalid";
-    case FR_DENIED: return "Acces denied";
+    case FR_NO_FILE: return "File not found";
+    case FR_NO_PATH: return "Path not found";
+    case FR_INVALID_NAME: return "Invalid path";
+    case FR_DENIED: return "Access denied";
     case FR_EXIST: return "Already exist";
-    case FR_INVALID_OBJECT: return "The file/directory object is invalid";
+    case FR_INVALID_OBJECT: return "The FS object is invalid";
     case FR_WRITE_PROTECTED: return "The drive is write protected";
     case FR_INVALID_DRIVE: return "The drive number is invalid";
     case FR_NOT_ENABLED: return "The volume has no work area";
@@ -185,13 +181,6 @@ static int sdc_cmd_finish(unsigned cmd) {
     while (1) {
         unsigned status = regs->cmd_int_status;
         if (status) {
-#if 0
-            dprintf("cmd %x (%d) %c%c, status %x\n",
-                cmd, cmd,
-                regs->command & (1 << 5) ? 'R' : ' ',
-                regs->command & (1 << 6) ? 'W' : ' ',
-                status);
-#endif
             // clear interrupts
             regs->cmd_int_status = 0;
             while (regs->software_reset != 0) {}
@@ -415,17 +404,17 @@ DRESULT disk_read(BYTE drv, BYTE * buf, LBA_t sector, UINT count) {
 }
 
 DSTATUS disk_initialize(BYTE drv) {
-    if (ini_sd() < 0) kprintf("Cannot init SD: %s\n", errno_to_str());
+    if (ini_sd() < 0) kprintf("Cannot access SD: %s\n", errno_to_str());
     return drv_status;
 }
 
-static uintptr_t read_num(FIL * fd, unsigned size) {
+static uintptr_t read_num(unsigned size) {
     uint8_t buf[0x10];
     uintptr_t v = 0;
     unsigned n = 0;
     UINT rd;
     if (errno) return 0;
-    errno = f_read(fd, buf, size, &rd);
+    errno = f_read(&fd, buf, size, &rd);
     if (errno) return 0;
     if (rd < size) {
         errno = ERR_EOF;
@@ -437,9 +426,9 @@ static uintptr_t read_num(FIL * fd, unsigned size) {
     return v;
 }
 
-#define read_uint16() (uint16_t)read_num(&fd, 2)
-#define read_uint32() (uint32_t)read_num(&fd, 4)
-#define read_addr() (uintptr_t)read_num(&fd, __riscv_xlen >> 3)
+#define read_uint16() (uint16_t)read_num(2)
+#define read_uint32() (uint32_t)read_num(4)
+#define read_addr() (uintptr_t)read_num(__riscv_xlen >> 3)
 
 #define PT_LOAD 1
 
@@ -451,7 +440,6 @@ static int download(void) {
     uint16_t phentsize = 0;
     uint16_t phnum = 0;
     unsigned i = 0;
-    FIL fd;
 
     errno = f_open(&fd, fnm, FA_READ);
     if (errno) return -1;
@@ -510,9 +498,9 @@ static int download(void) {
             size_t size = 0x10000;
             if (size > p_filesz - pos) size = (size_t)(p_filesz - pos);
             if (size > p_memsz - pos) size = (size_t)(p_memsz - pos);
-            if (addr + size >= BOOTROM_MEM_ADDR && addr < BOOTROM_MEM_END) {
+            if (addr + size > BOOTROM_MEM_ADDR && addr < BOOTROM_MEM_END) {
                 mem = (uint8_t *)(addr - BOOTROM_MEM_ADDR + BOOTROM_MEM_ALT);
-                if (addr + size >= BOOTROM_MEM_END) size = BOOTROM_MEM_END - addr;
+                if (addr + size > BOOTROM_MEM_END) size = BOOTROM_MEM_END - addr;
                 alt_mem = 1;
             }
             errno = f_read(&fd, mem, size, &rd);
@@ -529,9 +517,9 @@ static int download(void) {
             uint8_t * mem = (void *)addr;
             size_t size = 0x10000;
             if (size > p_memsz - pos) size = (size_t)p_memsz - pos;
-            if (addr + size >= BOOTROM_MEM_ADDR && addr < BOOTROM_MEM_END) {
+            if (addr + size > BOOTROM_MEM_ADDR && addr < BOOTROM_MEM_END) {
                 mem = (uint8_t *)(addr - BOOTROM_MEM_ADDR + BOOTROM_MEM_ALT);
-                if (addr + size >= BOOTROM_MEM_END) size = BOOTROM_MEM_END - addr;
+                if (addr + size > BOOTROM_MEM_END) size = BOOTROM_MEM_END - addr;
                 alt_mem = 1;
             }
             size_t s = size;
@@ -549,12 +537,21 @@ static int download(void) {
     asm volatile ("li  a0, 0"); // Hart No
     asm volatile ("li  a1, %0" :: "n" (BOOTROM_DTB_ADDR)); // Device Tree
     if (alt_mem) {
-        asm volatile ("lui  t0, %0" :: "n" (BOOTROM_MEM_ADDR >> 16));
-        asm volatile ("lui  t1, %0" :: "n" (BOOTROM_MEM_END >> 16));
-        asm volatile ("lui  t2, %0" :: "n" (BOOTROM_MEM_ALT >> 16));
-        asm volatile ("slli t0, t0, 4");
-        asm volatile ("slli t1, t1, 4");
-        asm volatile ("slli t2, t2, 4");
+#if __riscv_xlen <= 32 || (BOOTROM_MEM_END < 0x80000000 && BOOTROM_MEM_ALT < 0x80000000)
+        asm volatile ("li  t0, %0" :: "n" (BOOTROM_MEM_ADDR));
+        asm volatile ("li  t1, %0" :: "n" (BOOTROM_MEM_END));
+        asm volatile ("li  t2, %0" :: "n" (BOOTROM_MEM_ALT));
+#elif BOOTROM_MEM_END < 0x8000000000 && BOOTROM_MEM_ALT < 0x8000000000
+        /* Argument of "li" instruction is 32-bit signed integer, use shift to avoid sign extension */
+        asm volatile ("li  t0, %0" :: "n" (BOOTROM_MEM_ADDR >> 8));
+        asm volatile ("li  t1, %0" :: "n" (BOOTROM_MEM_END >> 8));
+        asm volatile ("li  t2, %0" :: "n" (BOOTROM_MEM_ALT >> 8));
+        asm volatile ("slli t0, t0, 8");
+        asm volatile ("slli t1, t1, 8");
+        asm volatile ("slli t2, t2, 8");
+#else
+#  error "Invalid Boot ROM memory address"
+#endif
 #if __riscv_xlen == 32
         asm volatile ("lw   a5, %0" :: "m" (entry_addr));
         asm volatile ("boot_rom_memcpy:");
@@ -571,8 +568,10 @@ static int download(void) {
         asm volatile ("addi t0, t0, 8");
         asm volatile ("addi t2, t2, 8");
         asm volatile ("bne  t0, t1, boot_rom_memcpy");
+        asm volatile ("fence.i" ::: "memory");
         asm volatile ("jr   a5");
     }
+    asm volatile ("fence.i" ::: "memory");
     asm volatile ("jr %0" :: "r" (entry_addr));
 
     return 0;
@@ -584,7 +583,7 @@ int main(void) {
 
     for (;;) {
         kputs("");
-        kprintf("RISC-V %d, Boot ROM V3.1\n", __riscv_xlen);
+        kprintf("RISC-V %d, Boot ROM V3.2\n", __riscv_xlen);
         drv_status = STA_NOINIT;
         errno = f_mount(&fatfs, "", 1);
         if (errno) {
@@ -593,6 +592,7 @@ int main(void) {
         else if (download() != 0) {
             kprintf("Cannot read BOOT.ELF: %s\n", errno_to_str());
         }
+        if (fd.obj.fs) f_close(&fd);
         usleep(1000000);
     }
     return 0;

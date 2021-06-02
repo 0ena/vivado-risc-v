@@ -5,7 +5,7 @@
 This repository contains FPGA prototype of fully functional [RISC-V](https://riscv.org/) Linux server
 with networking, online Linux package repository and daily package updates.
 It includes scripts and sources to generate RISC-V SoC HDL, Xilinx Vivado project, FPGA bitstream, and bootable SD card.
-The SD card contains [Berkeley Boot Loader (aka RISC-V Proxy Kernel)](https://github.com/riscv/riscv-pk), [U-Boot](https://github.com/u-boot/u-boot), [Linux kernel](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) and Debian root FS.
+The SD card contains [RISC-V Open Source Supervisor Binary Interface (OpenSBI)](https://github.com/riscv/opensbi), [U-Boot](https://github.com/u-boot/u-boot), [Linux kernel](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) and Debian root FS.
 Linux package repositories and regular updates are provided by [Debian](https://wiki.debian.org/RISC-V).
 Over 90% of packages of the whole Debian collection are available for download.
 
@@ -19,18 +19,21 @@ Latest Xilinx tools (Ver. 2020.1+) support debugging of RISC-V software over JTA
 
 ## Hardware
 [Xilinx VC707](https://www.xilinx.com/products/boards-and-kits/ek-v7-vc707-g.html) or
+[Xilinx KC705](https://www.xilinx.com/products/boards-and-kits/ek-k7-kc705-g.html) or
 [Digilent Genesys 2](https://reference.digilentinc.com/reference/programmable-logic/genesys-2/start) or
-[Digilent Nexys Video](https://reference.digilentinc.com/reference/programmable-logic/nexys-video/start) board.
+[Digilent Nexys Video](https://reference.digilentinc.com/reference/programmable-logic/nexys-video/start) or
+[Digilent Nexys A7 100T](https://reference.digilentinc.com/reference/programmable-logic/nexys-a7/start) board.
 
-VC707 allows to prototype more powerful system: 2X cores (4 vs 2),
-2X memory (1GB vs 512MB), 2X CPU clock frequency (100MHz vs 50MHz).
+VC707 allows to prototype more powerful system: up to 8 64-bit RISC-V cores, up to 100MHz clock speed, 1GB RAM.
 
-Nexys Video is several times less expensive, academic discount is avaialble.
+KC705 and Genesys 2 are as fast as VC707, but have slightly smaller FPGA - up to 4 cores.
 
-Genesys 2 is as fast as VC707, but has slightly smaller FPGA.
+Nexys Video is several times less expensive, academic discount is avaialble. It supports up to 2 cores, up to 50MHz clock speed.
+
+Nexys A7 100T is least expensive supported board. It has small FPGA and only 128MB RAM, barely enough to run Linux on a single core RISC-V at 50MHz.
 
 ## Workstation
-[Ubuntu 20 LTS](https://ubuntu.com/download/desktop) machine is recommended.
+[Ubuntu 20 LTS](https://ubuntu.com/download/desktop) machine with min 32GB RAM is recommended.
 sudo access required.
 
 ## Software
@@ -39,9 +42,9 @@ sudo access required.
 [Vitis 2019.2](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/vitis/2019-2.html).
 Vitis installation includes Vivado Design Suite – there is no need to install Vivado separately.
 
-Nexys Video is supported by free version of Vivado. VC707 and Genesys 2 requires Vivado license.
+Nexys Video and Nexys A7 100T are supported by free version of Vivado. KC705, VC707 and Genesys 2 require Vivado license.
 
-If using Nexys Video or Genesys 2, install [Vivado Board Files for Digilent FPGA Boards](https://github.com/Digilent/vivado-boards).
+If using Nexys Video, Nexys A7 100T or Genesys 2, install [Vivado Board Files for Digilent FPGA Boards](https://github.com/Digilent/vivado-boards).
 
 # Usage
 
@@ -59,12 +62,17 @@ make update-submodules
 source /opt/Xilinx/Vivado/2020.2/settings64.sh
 make CONFIG=rocket64b2 BOARD=nexys-video bitstream
 ```
+For KC705, use `BOARD=kc705`
+
 For VC707, use `BOARD=vc707`
 
 For Genesys 2 use `BOARD=genesys2`
 
+For Nexys A7 100T use `BOARD=nexys-a7-100t`
+
 Available CONFIG values:
 * 64-bit big RISC-V cores, Linux capable:
+  * `rocket64b1` - 1 core
   * `rocket64b2` - 2 cores
   * `rocket64b2l2` - 2 cores with 512KB level 2 cache
   * `rocket64b2gem` - 2 cores with 512KB level 2 cache and Gemmini accelerator
@@ -93,17 +101,21 @@ Make sure to confirm right SD card device - all old data will be erased.
 - Open Vivado
 ```
 source /opt/Xilinx/Vivado/2020.2/settings64.sh
-make CONFIG=rocket64b2 BOARD=nexys-video vivado-gui
+make CONFIG=rocket64b2 BOARD=nexys-video bitstream vivado-gui
 ```
 - Open the hardware manager and open the target board
 - Select Tools - Add Configuration Memory Device
 - Select the following device:
-  - Nexys Video: Spansion s25fl256xxxxxx0
-  - Genesys 2: Spansion s25fl256xxxxxx0
-  - VC707: Micron mt28gu01gaaxle
+  - Nexys A7 100T: Spansion s25fl128sxxxxxx0
+  - Nexys Video: Spansion s25fl256sxxxxxx0
+  - Genesys 2: Spansion s25fl256sxxxxxx0
+  - KC705: Micron 28f00ap30t
+  - VC707: Micron mt28gu01gaax1e
 - Add configuration file:
+  - Nexys A7 100T: workspace/rocket64b1/nexys-a7-100t-riscv.mcs
   - Nexys Video: workspace/rocket64b2/nexys-video-riscv.mcs
   - Genesys 2: workspace/rocket64b2/genesys2-riscv.mcs
+  - KC705: workspace/rocket64b2/kc705-riscv.mcs
   - VC707: workspace/rocket64b2/vc707-riscv.mcs
 - Press Ok. Flashing will take a couple of minutes.
 - Right click on the FPGA device - Boot from Configuration Memory Device (or press the program button on the board)
@@ -151,12 +163,12 @@ CONFIG_GPIO_XILINX=y
 
 If necessary, change config, then rebuild Linux kernel and bootloader:
 ```
-make linux bbl
+make linux bootloader
 ./mk-sd-image -r debian-riscv64-boot
 ```
 Copy debian-riscv64-boot/extlinux directory to the SD card.
 
-Note: don't change files in the project submodules: linux-stable, u-boot, riscv-pk or rocket-chip.
+Note: don't change files in the project submodules: linux-stable, u-boot, opensbi or rocket-chip.
 Such changes are lost when the project is rebuilt.
 
 For details on Xilinx drivers, see [Linux Drivers](https://xilinx-wiki.atlassian.net/wiki/spaces/A/pages/18841873/Linux%2BDrivers).
@@ -213,17 +225,17 @@ which is a collection of Ethernet-related components for gigabit, 10G, and 25G p
 Linux kernel and U-Boot use device tree, which is stored in RISC-V bootrom in FPGA.
 So, same SD card should boot OK on any board or RISC-V configuration.
 
-Nexys Video board can be configured to [load FPGA bitstream from SD card](https://reference.digilentinc.com/reference/programmable-logic/nexys-video/reference-manual#usb_host_and_micro_sd_programming).
+Nexys Video and Nexys A7 boards can be configured to [load FPGA bitstream from SD card](https://reference.digilentinc.com/reference/programmable-logic/nexys-video/reference-manual#usb_host_and_micro_sd_programming).
 
 The device tree contains Ethernet MAC address, which is not unique.
 It might be necessary to rebuild bitstream with different MAC, see Makefile for details.
 
 If not using provided SD card image: the bootrom loads and executes boot.elf file from SD card DOS partition.
 boot.elf is regular executable ELF, it can contain any software suitable for RISC-V RV64 M mode.
-In case of Linux boot, boot.elf contains Berkeley Boot Loader and U-Boot.
+In case of Linux boot, boot.elf contains OpenSBI and U-Boot.
 
 The Makefile creates Vivado project directory, e.g. workspace/rocket64b2/vivado-nexys-video-riscv.
 You can open the project in Vivado GUI to see RISC-V SoC structure, make changes, add peripherals, rebuild the bitstream.
-The SoC occupies about 60% of FPGA, leaving plenty of space for experiments and developing additional hardware.
+The SoC occupies portion of FPGA, leaving plenty of space for experiments and developing additional hardware.
 
 RISC-V SoC in this repo uses BSCAN block to support both RISC-V debugging and FPGA access over same JTAG cable.

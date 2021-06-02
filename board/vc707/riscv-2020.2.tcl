@@ -38,9 +38,9 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 # source riscv_script.tcl
 
 
-# The design that will be created by this Tcl script contains the following 
+# The design that will be created by this Tcl script contains the following
 # module references:
-# rocket, synchronizer, ethernet, sdc_controller, uart, ethernet_vc707
+# $rocket_module_name, synchronizer, ethernet, sdc_controller, uart, ethernet_vc707
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -96,7 +96,7 @@ if { ${design_name} eq "" } {
    set errMsg "Design <$design_name> already exists in your project, please set the variable <design_name> to another value."
    set nRet 1
 } elseif { [get_files -quiet ${design_name}.bd] ne "" } {
-   # USE CASES: 
+   # USE CASES:
    #    6) Current opened design, has components, but diff names, design_name exists in project.
    #    7) No opened design, design_name exists in project.
 
@@ -130,7 +130,7 @@ set bCheckIPsPassed 1
 ##################################################################
 set bCheckIPs 1
 if { $bCheckIPs == 1 } {
-   set list_check_ips "\ 
+   set list_check_ips "\
 xilinx.com:ip:clk_wiz:6.0\
 xilinx.com:ip:util_ds_buf:2.1\
 xilinx.com:ip:smartconnect:1.0\
@@ -162,8 +162,8 @@ xilinx.com:ip:gig_ethernet_pcs_pma:16.2\
 ##################################################################
 set bCheckModules 1
 if { $bCheckModules == 1 } {
-   set list_check_mods "\ 
-rocket\
+   set list_check_mods "\
+$rocket_module_name\
 synchronizer\
 ethernet\
 sdc_controller\
@@ -475,7 +475,7 @@ proc create_hier_cell_EthernetVC707 { parentCell nameHier } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
-  
+
   # Create instance: gig_ethernet_pcs_pma_0, and set properties
   set gig_ethernet_pcs_pma_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:gig_ethernet_pcs_pma:16.2 gig_ethernet_pcs_pma_0 ]
   set_property -dict [ list \
@@ -591,7 +591,7 @@ proc create_hier_cell_IO { parentCell nameHier } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
-  
+
   # Create instance: EthernetVC707
   create_hier_cell_EthernetVC707 $hier_obj EthernetVC707
 
@@ -619,7 +619,7 @@ proc create_hier_cell_IO { parentCell nameHier } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
-  
+
   # Create instance: XADC, and set properties
   set XADC [ create_bd_cell -type ip -vlnv xilinx.com:ip:xadc_wiz:3.3 XADC ]
   set_property -dict [ list \
@@ -788,7 +788,7 @@ proc create_hier_cell_DDR { parentCell nameHier } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
-  
+
   # Create interface connections
   connect_bd_intf_net -intf_net MEM_AXI4 [get_bd_intf_pins S00_AXI] [get_bd_intf_pins axi_smc_1/S00_AXI]
   connect_bd_intf_net -intf_net axi_smc_1_M00_AXI [get_bd_intf_pins axi_smc_1/M00_AXI] [get_bd_intf_pins mig_7series_0/S_AXI]
@@ -881,16 +881,9 @@ proc create_root_design { parentCell } {
   create_hier_cell_IO [current_bd_instance .] IO
 
   # Create instance: RocketChip, and set properties
-  set block_name rocket
-  set block_cell_name RocketChip
-  if { [catch {set RocketChip [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
-     catch {common::send_gid_msg -ssname BD::TCL -id 2095 -severity "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   } elseif { $RocketChip eq "" } {
-     catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
-     return 1
-   }
-  
+  global rocket_module_name
+  set RocketChip [create_bd_cell -type module -reference $rocket_module_name RocketChip]
+
   # Create instance: clk_wiz_0, and set properties
   set clk_wiz_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 clk_wiz_0 ]
   set_property -dict [ list \
@@ -939,7 +932,7 @@ proc create_root_design { parentCell } {
   connect_bd_net -net clock_200MHz [get_bd_pins DDR/clock_200MHz] [get_bd_pins IO/clock_200MHz] [get_bd_pins clk_wiz_0/clk_out2]
   connect_bd_net -net clock_ok [get_bd_pins RocketChip/clock_ok] [get_bd_pins clk_wiz_0/locked]
   connect_bd_net -net device_temp [get_bd_pins DDR/device_temp] [get_bd_pins IO/device_temp]
-  connect_bd_net -net fan_en [get_bd_ports fan_en] [get_bd_pins IO/fan_en]
+  connect_bd_net -net fan_en [get_bd_pins IO/fan_en] [get_bd_ports fan_en]
   connect_bd_net -net mem_ok [get_bd_pins DDR/init_calib_complete] [get_bd_pins RocketChip/mem_ok]
   connect_bd_net -net reset_h [get_bd_ports reset] [get_bd_pins DDR/sys_reset] [get_bd_pins IO/sys_reset] [get_bd_pins RocketChip/sys_reset] [get_bd_pins clk_wiz_0/reset]
   connect_bd_net -net sys_clock [get_bd_pins clk_wiz_0/clk_in1] [get_bd_pins sys_diff_clock_buf/IBUF_OUT]
@@ -968,5 +961,3 @@ proc create_root_design { parentCell } {
 ##################################################################
 
 create_root_design ""
-
-

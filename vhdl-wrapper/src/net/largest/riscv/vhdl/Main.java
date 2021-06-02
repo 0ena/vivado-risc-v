@@ -25,6 +25,8 @@ import net.largest.riscv.vhdl.Verilog2001Parser.Unary_operatorContext;
 
 public class Main {
 
+    private static String rocket_module_name = "rocket";
+
     private static final Map<String,String> macros = new HashMap<String,String>();
 
     private enum IfDefState {
@@ -225,6 +227,8 @@ public class Main {
             else if (sig_name.startsWith("l2_frontend_bus_axi4_0_")) bus_name = "dma_axi4";
             else if (sig_name.startsWith("debug_clockeddmi_dmi_")) bus_name = "dmi";
             else if (sig_name.startsWith("debug_systemjtag_jtag_")) bus_name = "jtag";
+            else if (sig_name.startsWith("debug_debug_clockeddmi_dmi_")) bus_name = "dmi";
+            else if (sig_name.startsWith("debug_debug_systemjtag_jtag_")) bus_name = "jtag";
             else continue;
             for (int i = 0; i < atts.length; i += 2) {
                 if (sig_name.endsWith("_" + atts[i])) {
@@ -285,7 +289,7 @@ public class Main {
 
     private static void generateEntityPort() {
         ln("");
-        ln("entity rocket is");
+        ln("entity " + rocket_module_name + " is");
         ln("    port (");
         ln("        clock      : in std_logic;");
         ln("        clock_ok   : in std_logic;");
@@ -332,7 +336,7 @@ public class Main {
         }
         if (s != null) ln(s + ");");
         else ln("    );");
-        ln("end rocket;");
+        ln("end " + rocket_module_name + ";");
     }
 
     private static void generateBusAttributes() {
@@ -529,6 +533,19 @@ public class Main {
             else if (nm.equals("debug_dmactive")) dst = "debug_dmactive";
             else if (nm.equals("debug_dmactiveAck")) dst = "debug_dmactive";
             else if (nm.startsWith("resetctrl_hartIsInReset")) dst = "'0'";
+            else if (nm.equals("debug_debug_clock")) dst = "clock";
+            else if (nm.equals("debug_debug_reset")) dst = "debug_reset";
+            else if (nm.equals("debug_debug_clockeddmi_dmiClock")) dst = "clock";
+            else if (nm.equals("debug_debug_clockeddmi_dmiReset")) dst = "reset";
+            else if (nm.equals("debug_debug_systemjtag_reset")) dst = "'0'";
+            else if (nm.equals("debug_debug_systemjtag_mfr_id")) dst = "\"10010001001\"";
+            else if (nm.equals("debug_debug_systemjtag_part_number")) dst = "\"0000000000000000\"";
+            else if (nm.equals("debug_debug_systemjtag_version")) dst = "\"0000\"";
+            else if (nm.equals("debug_debug_systemjtag_jtag_TDO_driven")) dst = "enable_tdo";
+            else if (nm.equals("debug_debug_ndreset")) dst = "debug_reset";
+            else if (nm.equals("debug_debug_dmactive")) dst = "debug_dmactive";
+            else if (nm.equals("debug_debug_dmactiveAck")) dst = "debug_dmactive";
+            else if (nm.startsWith("resetctrl_resetctrl_hartIsInReset")) dst = "'0'";
             else if (nm.equals("interrupts")) dst = "interrupts_sync";
             else dst = nm;
             if (s != null) ln(s + ',');
@@ -574,7 +591,7 @@ public class Main {
         generateEntityPort();
 
         ln("");
-        ln("architecture Behavioral of rocket is");
+        ln("architecture Behavioral of " + rocket_module_name + " is");
         ln("    ATTRIBUTE X_INTERFACE_INFO : STRING;");
         ln("    ATTRIBUTE X_INTERFACE_PARAMETER : STRING;");
         ln("");
@@ -666,13 +683,20 @@ public class Main {
     }
 
     public static void main(String[] args) {
-        if (args.length != 1) {
+        int arg_pos = 0;
+        if (arg_pos < args.length && args[arg_pos].equals("-m")) {
+            arg_pos++;
+            if (arg_pos < args.length) {
+                rocket_module_name = args[arg_pos++];
+            }
+        }
+        if (args.length - arg_pos != 1) {
             System.err.println("Usage:");
             System.err.println("  java net.largest.riscv.vhdl.Main [options] <Verilog file name>");
             System.exit(1);
         }
         try {
-            CharStream input = CharStreams.fromFileName(args[0]);
+            CharStream input = CharStreams.fromFileName(args[arg_pos]);
             Verilog2001Lexer lexer = new Verilog2001Lexer(input) {
                 boolean skip = false;
                 final LinkedList<IfDefState> stack = new LinkedList<IfDefState>();

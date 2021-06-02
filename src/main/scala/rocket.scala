@@ -27,13 +27,14 @@ class RocketSystemModuleImp[+L <: RocketSystem](_outer: L) extends RocketSubsyst
 
 class WithGemmini(mesh_size: Int, bus_bits: Int) extends Config((site, here, up) => {
   case BuildRoCC => up(BuildRoCC) ++ Seq(
-      (p: Parameters) => {
-        implicit val q = p
-        implicit val v = implicitly[ValName]
-        LazyModule(new gemmini.Gemmini(OpcodeSet.custom3,
-          gemmini.GemminiConfigs.defaultConfig.copy(meshRows = mesh_size, meshColumns = mesh_size, dma_buswidth = bus_bits)))
+    (p: Parameters) => {
+      implicit val q = p
+      implicit val v = implicitly[ValName]
+      LazyModule(new gemmini.Gemmini(gemmini.GemminiConfigs.defaultConfig.copy(
+        meshRows = mesh_size, meshColumns = mesh_size, dma_buswidth = bus_bits)))
     }
   )
+  case SystemBusKey => up(SystemBusKey).copy(beatBytes = bus_bits/8)
 })
 
 class WithDebugProgBuf(prog_buf_words: Int, imp_break: Boolean) extends Config((site, here, up) => {
@@ -41,14 +42,14 @@ class WithDebugProgBuf(prog_buf_words: Int, imp_break: Boolean) extends Config((
 })
 
 /*
- * WithExtMemSize(0x40000000) = 1GB is max supported by the base config.
+ * WithExtMemSize(0x80000000L) = 2GB is max supported by the base config.
  * Actual memory size depends on the target board.
  * The Makefile changes the size to correct value during build.
  * It also sets right core clock frequency.
  */
 class RocketBaseConfig extends Config(
   new WithBootROMFile("workspace/bootrom.img") ++
-  new WithExtMemSize(0x40000000) ++
+  new WithExtMemSize(0x80000000L) ++
   new WithNExtTopInterrupts(8) ++
   new WithDTS("freechips,rocketchip-vivado", Nil) ++
   new WithDebugSBA ++
@@ -59,7 +60,7 @@ class RocketBaseConfig extends Config(
 
 class RocketWideBusConfig extends Config(
   new WithBootROMFile("workspace/bootrom.img") ++
-  new WithExtMemSize(0x40000000) ++
+  new WithExtMemSize(0x80000000L) ++
   new WithNExtTopInterrupts(8) ++
   new WithDTS("freechips,rocketchip-vivado", Nil) ++
   new WithDebugSBA ++
@@ -111,9 +112,22 @@ class Rocket32s16 extends Config(
 
 /*----------------- 64-bit RocketChip ---------------*/
 
+class Rocket64b1 extends Config(
+  new WithNBreakpoints(8) ++
+  new WithNBigCores(1)    ++
+  new RocketBaseConfig)
+
 class Rocket64b2 extends Config(
   new WithNBreakpoints(8) ++
   new WithNBigCores(2)    ++
+  new RocketBaseConfig)
+
+/* With up to 256GB memory */
+/* Note: lower 2GB are used for memory mapped IO, so max usable RAM size is 254GB */
+class Rocket64b2m extends Config(
+  new WithNBreakpoints(8) ++
+  new WithNBigCores(2)    ++
+  new WithExtMemSize(0x3f80000000L) ++
   new RocketBaseConfig)
 
 /* With exposed JTAG port */
@@ -168,6 +182,13 @@ class Rocket64m2gem extends Config(
   new WithNMedCores(2)    ++
   new RocketBaseConfig)
 
+class Rocket64b1gem extends Config(
+  new WithGemmini(2, 64)  ++
+  new WithInclusiveCache  ++
+  new WithNBreakpoints(8) ++
+  new WithNBigCores(1)    ++
+  new RocketBaseConfig)
+
 class Rocket64b2gem extends Config(
   new WithGemmini(2, 64)  ++
   new WithInclusiveCache  ++
@@ -191,6 +212,18 @@ class Rocket64b8 extends Config(
   new WithNBreakpoints(8) ++
   new WithNBigCores(8)    ++
   new RocketBaseConfig)
+
+/* Without slave port - for use in HDL simulation */
+class Rocket64b2s extends Config(
+  new WithNBigCores(2)    ++
+  new WithBootROMFile("workspace/bootrom.img") ++
+  new WithExtMemSize(0x40000000) ++
+  new WithNExtTopInterrupts(8) ++
+  new WithEdgeDataBits(64) ++
+  new WithCoherentBusTopology ++
+  new WithoutTLMonitors ++
+  new WithNoSlavePort ++
+  new BaseConfig)
 
 /*----------------- Sonic BOOM   ---------------*/
 
@@ -216,4 +249,13 @@ class Rocket64z1 extends Config(
   new WithInclusiveCache  ++
   new WithNBreakpoints(8) ++
   new boom.common.WithNMegaBooms(1) ++
+  new RocketWideBusConfig)
+
+/* With up to 256GB memory */
+/* Note: lower 2GB are used for memory mapped IO, so max usable RAM size is 254GB */
+class Rocket64z2m extends Config(
+  new WithInclusiveCache  ++
+  new WithNBreakpoints(8) ++
+  new boom.common.WithNMegaBooms(2) ++
+  new WithExtMemSize(0x3f80000000L) ++
   new RocketWideBusConfig)

@@ -36,6 +36,7 @@ set files [list \
  [file normalize "../../ethernet/ethernet.v"] \
  [file normalize "../../vhdl-wrapper/src/net/largest/riscv/vhdl/bscan2jtag.vhdl"] \
  [file normalize "../../board/${vivado_board_name}/ethernet-${vivado_board_name}.v"] \
+ [file normalize "../../board/fan-control.v"] \
 ]
 add_files -norecurse -fileset $source_fileset $files
 
@@ -95,4 +96,3 @@ make_wrapper -files [get_files riscv.bd] -top
 add_files -norecurse [file normalize vivado-${vivado_board_name}-riscv/${vivado_board_name}-riscv.srcs/sources_1/bd/riscv/hdl/riscv_wrapper.v ]
 set_property top riscv_wrapper $source_fileset
 update_compile_order -fileset $source_fileset
-

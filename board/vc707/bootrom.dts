@@ -8,16 +8,14 @@
         stdout-path = "serial0";
     };
 
-    cpus {
-        timebase-frequency = <1000000>;
-    };
-
-    soc {
+    io-bus {
         #address-cells = <1>;
         #size-cells = <1>;
+        compatible = "rocketchip-vivado-io", "simple-bus";
+        ranges;
 
-        uart0: uartlite@60010000 {
-            compatible = "xlnx,xps-uartlite-1.00.a";
+        uart0: uart@60010000 {
+            compatible = "riscv,axi-uart-1.0";
             reg = <0x60010000 0x10000>;
             interrupt-parent = <&{/soc/interrupt-controller@c000000}>;
             interrupts = <1>;
@@ -39,7 +37,7 @@
         eth: eth0@60020000 {
             compatible = "riscv,axi-ethernet-1.0";
             reg = <0x60020000 0x10000>;
-            phy-mode = "rgmii";
+            phy-mode = "sgmii";
             local-mac-address = [00 0a 35 00 00 00];
             interrupt-parent = <&{/soc/interrupt-controller@c000000}>;
             interrupts = <3>;

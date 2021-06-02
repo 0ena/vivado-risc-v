@@ -29,13 +29,13 @@ workspace/gcc/riscv:
 debian-riscv64/initrd:
 	mkdir -p debian-riscv64
 	curl --netrc --location --header 'Accept: application/octet-stream' \
-	  https://api.github.com/repos/eugene-tarassov/vivado-risc-v/releases/assets/25545769 \
+	  https://api.github.com/repos/eugene-tarassov/vivado-risc-v/releases/assets/37912705 \
 	  -o $@
 
 debian-riscv64/rootfs.tar.gz:
 	mkdir -p debian-riscv64
 	curl --netrc --location --header 'Accept: application/octet-stream' \
-	  https://api.github.com/repos/eugene-tarassov/vivado-risc-v/releases/assets/25545771 \
+	  https://api.github.com/repos/eugene-tarassov/vivado-risc-v/releases/assets/37912707 \
 	  -o $@
 
 
@@ -49,6 +49,7 @@ linux-patch: patches/linux.patch patches/fpga-axi-sdc.c patches/fpga-axi-eth.c p
 	cd linux-stable && git reset --hard && patch -p1 <../patches/linux.patch
 	cp patches/fpga-axi-eth.c  linux-stable/drivers/net/ethernet
 	cp patches/fpga-axi-sdc.c  linux-stable/drivers/mmc/host
+	cp patches/fpga-axi-uart.c linux-stable/drivers/tty/serial
 	cp patches/linux.config linux-stable/.config
 
 linux-stable/arch/riscv/boot/Image: linux-patch
@@ -58,7 +59,7 @@ linux-stable/arch/riscv/boot/Image: linux-patch
 
 # --- build U-Boot ---
 
-u-boot: u-boot/u-boot
+u-boot: u-boot/u-boot-nodtb.bin
 
 U_BOOT_SRC = $(wildcard patches/u-boot/*/*) \
   patches/u-boot/vivado_riscv64_defconfig \
@@ -71,7 +72,7 @@ u-boot-patch: $(U_BOOT_SRC)
 	cp patches/u-boot/vivado_riscv64_defconfig u-boot/configs
 	cp patches/u-boot/vivado_riscv64.h u-boot/include/configs
 
-u-boot/u-boot: u-boot-patch $(U_BOOT_SRC)
+u-boot/u-boot-nodtb.bin: u-boot-patch $(U_BOOT_SRC)
 	make -C u-boot CROSS_COMPILE=$(CROSS_COMPILE_LINUX) vivado_riscv64_config
 	make -C u-boot \
 	  CC=$(CROSS_COMPILE_LINUX)gcc-8 \
@@ -80,26 +81,19 @@ u-boot/u-boot: u-boot-patch $(U_BOOT_SRC)
 	  all
 
 
-# --- build RISC-V Berkeley Boot Loader ---
+# --- build RISC-V Open Source Supervisor Binary Interface (OpenSBI) ---
 
-bbl: riscv-pk/build/bbl
+bootloader: workspace/boot.elf
 
-riscv-pk/build:
-	cd riscv-pk &&\
-	mkdir build &&\
-	cd build &&\
-	  ../configure \
-	  --host=riscv64-linux-gnu \
-	  --with-arch=rv64imafdc \
-	  --with-abi=lp64d \
-	  --with-payload=../../u-boot/u-boot \
-	  --with-mem-start=0x80000000
+workspace/boot.elf: opensbi/build/platform/vivado-risc-v/firmware/fw_payload.elf
+	mkdir -p workspace
+	cp $< $@
 
-riscv-pk-patch: riscv-pk/build patches/riscv-pk-uart.c
-	cp patches/riscv-pk-uart.c riscv-pk/machine/uart.c
-
-riscv-pk/build/bbl: riscv-pk-patch u-boot/u-boot
-	make -C riscv-pk/build mabi='-mabi=lp64d -O0 -g' bbl
+opensbi/build/platform/vivado-risc-v/firmware/fw_payload.elf: $(wildcard patches/opensbi/*) u-boot/u-boot-nodtb.bin
+	mkdir -p opensbi/platform/vivado-risc-v
+	cp -p patches/opensbi/* opensbi/platform/vivado-risc-v
+	make -C opensbi CROSS_COMPILE=$(CROSS_COMPILE_LINUX) PLATFORM=vivado-risc-v \
+	 FW_PAYLOAD_PATH=`realpath u-boot/u-boot-nodtb.bin`
 
 
 # --- generate HDL ---
@@ -109,68 +103,59 @@ CONFIG ?= rocket64b2
 CONFIG_SCALA := $(subst rocket,Rocket,$(CONFIG))
 JAVA_OPTIONS =
 
-ifeq ($(BOARD),nexys-video)
-  BOARD_PART  ?= digilentinc.com:nexys_video:part0:1.1
-  XILINX_PART ?= xc7a200tsbg484-1
-  CFG_DEVICE  ?= SPIx4 -size 256
-  MEMORY_SIZE ?= 0x20000000
-  ETHER_MAC   ?= 00 0a 35 00 00 01
-  ETHER_PHY   ?= rgmii
-endif
+include board/$(BOARD)/Makefile.inc
 
-ifeq ($(BOARD),genesys2)
-  BOARD_PART  ?= digilentinc.com:genesys2:part0:1.1
-  XILINX_PART ?= xc7k325tffg900-2
-  CFG_DEVICE  ?= SPIx4 -size 256
-  MEMORY_SIZE ?= 0x40000000
-  ETHER_MAC   ?= 00 0a 35 00 00 02
-  ETHER_PHY   ?= rgmii-rxid
-endif
+# valid ROCKET_FREQ_MHZ values (MHz): 125 100 80 62.5 50 40 31.25 25 20
+ROCKET_FREQ_MHZ ?= $(shell awk '$$3 != "" && "$(BOARD)" ~ $$1 && "$(CONFIG_SCALA)" ~ ("^" $$2 "$$") {print $$3; exit}' board/rocket-freq)
+ROCKET_CLOCK_FREQ := $(shell echo - | awk '{printf("%.0f\n", $(ROCKET_FREQ_MHZ) * 1000000)}')
+ROCKET_TIMEBASE_FREQ := $(shell echo - | awk '{printf("%.0f\n", $(ROCKET_FREQ_MHZ) * 10000)}')
 
-ifeq ($(BOARD),vc707)
-  BOARD_PART  ?= xilinx.com:vc707:part0:1.4
-  XILINX_PART ?= xc7vx485tffg1761-2
-  CFG_DEVICE  ?= bpix16 -size 128
-  MEMORY_SIZE ?= 0x40000000
-  ETHER_MAC   ?= 00 0a 35 00 00 00
-  ETHER_PHY   ?= sgmii
-endif
-
-# valid ROCKET_FREQ values (MHz): 125 100 80 62.5 50 40 31.25 25 20
-ROCKET_FREQ ?= $(shell awk '$$3 != "" && "$(BOARD)" ~ $$1 && "$(CONFIG_SCALA)" ~ ("^" $$2 "$$") {print $$3; exit}' board/rocket-freq)
-ROCKET_FREQ_KHZ := $(shell echo - | awk '{print $(ROCKET_FREQ) * 1000}')
-
-ifeq ($(findstring Rocket64,$(CONFIG_SCALA)),)
+ifneq ($(findstring Rocket32t,$(CONFIG_SCALA)),)
   CROSS_COMPILE_NO_OS_TOOLS = $(realpath workspace/gcc/riscv/bin)/riscv32-unknown-elf-
-  CROSS_COMPILE_NO_OS_FLAGS = -march=rv32im -mabi=ilp32
+  CROSS_COMPILE_NO_OS_FLAGS = -march=rv32imac -mabi=ilp32 -DFF_FS_EXFAT=0
+else ifneq ($(findstring Rocket32,$(CONFIG_SCALA)),)
+  CROSS_COMPILE_NO_OS_TOOLS = $(realpath workspace/gcc/riscv/bin)/riscv32-unknown-elf-
+  CROSS_COMPILE_NO_OS_FLAGS = -march=rv32imac -mabi=ilp32
 else
   CROSS_COMPILE_NO_OS_TOOLS = $(realpath workspace/gcc/riscv/bin)/riscv64-unknown-elf-
-  CROSS_COMPILE_NO_OS_FLAGS = -march=rv64im -mabi=lp64
+  CROSS_COMPILE_NO_OS_FLAGS = -march=rv64imac -mabi=lp64
+endif
+
+ifeq ($(shell echo $$(($(MEMORY_SIZE) <= 0x80000000))),1)
+  MEMORY_ADDR_RANGE = 0x80000000 $(MEMORY_SIZE)
+  MEMORY_ADDR_RANGE32 = 0x80000000 $(MEMORY_SIZE)
+else ifeq ($(shell echo $$(($(MEMORY_SIZE) / 0x100000000))),0)
+  MEMORY_ADDR_RANGE = 0x80000000 0x80000000
+  MEMORY_ADDR_RANGE32 = 0x80000000 0x80000000
+else
+  MEMORY_ADDR_RANGE = 0x0 0x80000000 $(shell echo - | awk '{printf "0x%x", $(MEMORY_SIZE) / 0x100000000 - 1}') 0x80000000
+  MEMORY_ADDR_RANGE32 = 0x80000000 0x80000000
 endif
 
 SBT := java -Xmx4G -Xss8M $(JAVA_OPTIONS) -jar $(realpath rocket-chip/sbt-launch.jar)
-CHISEL_SRC := $(foreach path, src/main rocket-chip/src/main riscv-boom/src/main, $(shell test -d $(path) && find $(path) -iname "*.scala"))
 
-ROCKET_CLASSES = \
-  target/scala-2.12/classes \
-  rocket-chip/target/scala-2.12/classes \
-  rocket-chip/chisel3/target/scala-2.12/classes \
-  rocket-chip/chisel3/core/target/scala-2.12/classes \
-  rocket-chip/chisel3/macros/target/scala-2.12/classes
+CHISEL_SRC_DIRS = \
+  src/main \
+  rocket-chip/src/main \
+  generators/gemmini/src/main \
+  generators/riscv-boom/src/main \
+  generators/sifive-cache/design/craft \
+  generators/testchipip/src/main
 
-SPACE := $(subst ,, )
+CHISEL_SRC := $(foreach path, $(CHISEL_SRC_DIRS), $(shell test -d $(path) && find $(path) -iname "*.scala"))
 
 FIRRTL_SRC := $(shell test -d rocket-chip/firrtl/src/main && find rocket-chip/firrtl/src/main -iname "*.scala")
 FIRRTL_JAR = rocket-chip/firrtl/utils/bin/firrtl.jar
-FIRRTL = java -Xmx12G -Xss8M $(JAVA_OPTIONS) -cp $(FIRRTL_JAR):$(subst $(SPACE),:,$(strip $(ROCKET_CLASSES))) firrtl.stage.FirrtlMain
+FIRRTL = java -Xmx12G -Xss8M $(JAVA_OPTIONS) -cp $(FIRRTL_JAR):target/scala-2.12/classes:rocket-chip/rocketchip.jar firrtl.stage.FirrtlMain
 
 $(FIRRTL_JAR): $(FIRRTL_SRC)
-	make -C rocket-chip/firrtl SBT="$(SBT)" root_dir=$(realpath rocket-chip/firrtl) build-scala
+	make -C rocket-chip/firrtl SBT="$(SBT)" build-scala
 	touch $(FIRRTL_JAR)
 
-# Generate default device tree - not including peripheral devices or board specific data 
+# Generate default device tree - not including peripheral devices or board specific data
 workspace/$(CONFIG)/system.dts: $(FIRRTL_JAR) $(CHISEL_SRC) rocket-chip/bootrom/bootrom.img
 	cd rocket-chip && git reset --hard && patch -p1 <../patches/rocket-chip.patch
+	cd generators/gemmini && git reset --hard && patch -p1 <../../patches/gemmini.patch
 	mkdir -p workspace/$(CONFIG)/tmp
 	cp rocket-chip/bootrom/bootrom.img workspace/bootrom.img
 	$(SBT) "runMain freechips.rocketchip.system.Generator -td workspace/$(CONFIG)/tmp -T Vivado.RocketSystem -C Vivado.$(CONFIG_SCALA)"
@@ -178,19 +163,23 @@ workspace/$(CONFIG)/system.dts: $(FIRRTL_JAR) $(CHISEL_SRC) rocket-chip/bootrom/
 	mv workspace/$(CONFIG)/tmp/Vivado.$(CONFIG_SCALA).dts workspace/$(CONFIG)/system.dts
 	rm -rf workspace/$(CONFIG)/tmp
 
-# Generate board specific device tree and FIR
+# Generate board specific device tree, boot ROM and FIRRTL
 workspace/$(CONFIG)/system-$(BOARD)/Vivado.$(CONFIG_SCALA).fir: workspace/$(CONFIG)/system.dts $(wildcard bootrom/*) workspace/gcc/riscv
 	mkdir -p workspace/$(CONFIG)/system-$(BOARD)
-	cat workspace/$(CONFIG)/system.dts bootrom/bootrom.dts >bootrom/system.dts
-	sed -i "s#reg = <0x80000000 0x.*>#reg = <0x80000000 $(MEMORY_SIZE)>#g" bootrom/system.dts
-	sed -i "s#clock-frequency = <[0-9]*>#clock-frequency = <$(ROCKET_FREQ_KHZ)000>#g" bootrom/system.dts
-	sed -i "s#timebase-frequency = <[0-9]*>#timebase-frequency = <$(ROCKET_FREQ_KHZ)0>#g" bootrom/system.dts
+	cat workspace/$(CONFIG)/system.dts board/$(BOARD)/bootrom.dts >bootrom/system.dts
+	sed -i "s#reg = <0x80000000 *0x.*>#reg = <$(MEMORY_ADDR_RANGE32)>#g" bootrom/system.dts
+	sed -i "s#reg = <0x0 0x80000000 *0x.*>#reg = <$(MEMORY_ADDR_RANGE)>#g" bootrom/system.dts
+	sed -i "s#clock-frequency = <[0-9]*>#clock-frequency = <$(ROCKET_CLOCK_FREQ)>#g" bootrom/system.dts
+	sed -i "s#timebase-frequency = <[0-9]*>#timebase-frequency = <$(ROCKET_TIMEBASE_FREQ)>#g" bootrom/system.dts
 	sed -i "s#local-mac-address = \[.*\]#local-mac-address = [$(ETHER_MAC)]#g" bootrom/system.dts
 	sed -i "s#phy-mode = \".*\"#phy-mode = \"$(ETHER_PHY)\"#g" bootrom/system.dts
+	sed -i "/interrupts-extended = <&.* 65535>;/d" bootrom/system.dts
 	make -C bootrom CROSS_COMPILE="$(CROSS_COMPILE_NO_OS_TOOLS)" CFLAGS="$(CROSS_COMPILE_NO_OS_FLAGS)" clean bootrom.img
-	cp bootrom/system.dts workspace/$(CONFIG)/system-$(BOARD).dts
-	cp bootrom/bootrom.img workspace/bootrom.img
+	mv bootrom/system.dts workspace/$(CONFIG)/system-$(BOARD).dts
+	mv bootrom/bootrom.img workspace/bootrom.img
 	$(SBT) "runMain freechips.rocketchip.system.Generator -td workspace/$(CONFIG)/system-$(BOARD) -T Vivado.RocketSystem -C Vivado.$(CONFIG_SCALA)"
+	cd rocket-chip && $(SBT) assembly
+	rm workspace/bootrom.img
 
 # Generate Rocket SoC HDL
 workspace/$(CONFIG)/system-$(BOARD).v: workspace/$(CONFIG)/system-$(BOARD)/Vivado.$(CONFIG_SCALA).fir
@@ -210,7 +199,7 @@ workspace/$(CONFIG)/rocket.vhdl: workspace/$(CONFIG)/system-$(BOARD).v
 	  vhdl-wrapper/src/net/largest/riscv/vhdl/Main.java
 	java -Xmx4G -Xss8M $(JAVA_OPTIONS) -cp \
 	  vhdl-wrapper/src:vhdl-wrapper/bin:vhdl-wrapper/antlr-4.8-complete.jar \
-	  net.largest.riscv.vhdl.Main \
+	  net.largest.riscv.vhdl.Main -m $(CONFIG_SCALA) \
 	  workspace/$(CONFIG)/system-$(BOARD).v >$@
 
 # --- utility make targets to run SBT command line ---
@@ -230,42 +219,47 @@ rocket-sbt:
 proj_name = $(BOARD)-riscv
 proj_path = workspace/$(CONFIG)/vivado-$(proj_name)
 proj_file = $(proj_path)/$(proj_name).xpr
+proj_time = $(proj_path)/timestamp.txt
 bitstream = $(proj_path)/$(proj_name).runs/impl_1/riscv_wrapper.bit
 mcs_file  = workspace/$(CONFIG)/$(proj_name).mcs
 vivado    = env XILINX_LOCAL_USER_DATA=no vivado -mode batch -nojournal -nolog -notrace -quiet
 
-workspace/$(CONFIG)/system-$(BOARD).tcl: workspace/$(CONFIG)/rocket.vhdl workspace/$(CONFIG)/system-$(BOARD).v
+workspace/$(CONFIG)/system-$(BOARD).tcl: workspace/$(CONFIG)/rocket.vhdl
 	echo "set vivado_board_name $(BOARD)" >$@
 	echo "set vivado_board_part $(BOARD_PART)" >>$@
 	echo "set xilinx_part $(XILINX_PART)" >>$@
-	echo "set riscv_clock_frequency $(ROCKET_FREQ)" >>$@
-	echo 'set script_folder [file dirname [file normalize [info script]]]' >>$@
-	echo 'cd $$script_folder' >>$@
+	echo "set rocket_module_name $(CONFIG_SCALA)" >>$@
+	echo "set riscv_clock_frequency $(ROCKET_FREQ_MHZ)" >>$@
+	echo 'cd [file dirname [file normalize [info script]]]' >>$@
 	echo 'source ../../vivado.tcl' >>$@
 
 vivado-tcl: workspace/$(CONFIG)/system-$(BOARD).tcl
 
-$(proj_file): workspace/$(CONFIG)/system-$(BOARD).tcl
+$(proj_time): workspace/$(CONFIG)/system-$(BOARD).tcl
 	if [ ! -e $(proj_path) ] ; then $(vivado) -source workspace/$(CONFIG)/system-$(BOARD).tcl ; fi
+	date >$@
 
-vivado-project: $(proj_file)
+vivado-project: $(proj_time)
 
 # --- generate FPGA bitstream ---
 
-$(proj_path)/make-bitstream.tcl: $(proj_file)
-	echo "open_project $(proj_file)">$@
-	echo "update_compile_order -fileset sources_1">>$@
-	echo "launch_runs impl_1 -to_step write_bitstream -jobs 4">>$@
-	echo "wait_on_run impl_1">>$@
-	echo "write_cfgmem -format mcs -interface $(CFG_DEVICE) -loadbit \"up 0x0 $(bitstream)\" -file $(mcs_file) -force">>$@
-
-$(bitstream): $(proj_path)/make-bitstream.tcl workspace/$(CONFIG)/rocket.vhdl
+$(bitstream): $(proj_time)
+	echo "open_project $(proj_file)" >$(proj_path)/make-bitstream.tcl
+	echo "update_compile_order -fileset sources_1" >>$(proj_path)/make-bitstream.tcl
+	echo "set_param general.maxThreads 4" >>$(proj_path)/make-bitstream.tcl
+	echo "launch_runs impl_1 -to_step write_bitstream -jobs 4" >>$(proj_path)/make-bitstream.tcl
+	echo "wait_on_run impl_1" >>$(proj_path)/make-bitstream.tcl
 	$(vivado) -source $(proj_path)/make-bitstream.tcl
 	if find $(proj_path) -name "*.log" -exec cat {} \; | grep 'ERROR: ' ; then exit 1 ; fi
 
-bitstream: $(bitstream)
+$(mcs_file): $(bitstream)
+	echo "open_project $(proj_file)" >$(proj_path)/make-mcs.tcl
+	echo "write_cfgmem -format mcs -interface $(CFG_DEVICE) -loadbit \"up 0x0 $(bitstream)\" -file $(mcs_file) -force" >>$(proj_path)/make-mcs.tcl
+	$(vivado) -source $(proj_path)/make-mcs.tcl
+
+bitstream: $(bitstream) $(mcs_file)
 
 # --- launch Vivado GUI ---
 
-vivado-gui: $(proj_file)
-	vivado $(proj_file) &
+vivado-gui: $(proj_time)
+	vivado $(proj_file)
